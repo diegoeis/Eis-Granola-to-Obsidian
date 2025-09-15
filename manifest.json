@@ -1,8 +1,8 @@
 {
 	"id": "eis-granola-sync",
 	"name": "Eis Granola Sync",
-	"version": "1.0.0",
-	"minAppVersion": "1.0.0",
+	"version": "1.0.1",
+	"minAppVersion": "1.0.1",
 	"description": "Based on Granola Sync plugin of Danny McClelland, Eis Granola AI syncs your notes from Granola AI to your vault with customizable settings.",
 	"author": "Diego Eis",
 	"authorUrl": "https://github.com/diegoeis/",
