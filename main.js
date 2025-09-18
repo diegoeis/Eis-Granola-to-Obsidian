@@ -848,7 +848,7 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 					}
 					
 					// Add custom properties (this is for updating existing notes in full update mode)
-					frontmatter = this.addCustomPropertiesToFrontmatter(frontmatter, false);
+					frontmatter = this.addCustomPropertiesToFrontmatter(frontmatter, false, doc);
 					
 					frontmatter += '---\n\n';
 
@@ -912,7 +912,7 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 			}
 			
 			// Add custom properties (this is for new notes)
-			frontmatter = this.addCustomPropertiesToFrontmatter(frontmatter, false);
+			frontmatter = this.addCustomPropertiesToFrontmatter(frontmatter, false, doc);
 			
 			frontmatter += '---\n\n';
 
@@ -1450,10 +1450,19 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 		}
 	}
 
-	addCustomPropertiesToFrontmatter(frontmatter, isExistingNote = false) {
+	addCustomPropertiesToFrontmatter(frontmatter, isExistingNote = false, doc = null) {
 		// Skip custom properties if this is an existing note and skipExistingNotes is enabled
 		if (isExistingNote && this.settings.skipExistingNotes) {
 			return frontmatter;
+		}
+		
+		// Add automatic date property from created_at using user's date format
+		if (doc && doc.created_at) {
+			const datePropertyPattern = /^date:\s/m;
+			if (!datePropertyPattern.test(frontmatter)) {
+				const formattedDate = this.formatDate(doc.created_at, this.settings.dateFormat);
+				frontmatter += `date: ${formattedDate}\n`;
+			}
 		}
 		
 		// Add custom properties if any are configured
@@ -1501,8 +1510,22 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 					frontmatter.granola_url = granolaUrl;
 				}
 				
-				// Custom properties are NOT added when skipExistingNotes is true
-				// Existing custom properties in the note are preserved
+				// Add automatic date property if not present and skipExistingNotes allows it
+				if (!this.settings.skipExistingNotes && doc.created_at && !frontmatter.date) {
+					frontmatter.date = this.formatDate(doc.created_at, this.settings.dateFormat);
+				}
+				
+				// Add custom properties if skipExistingNotes allows it
+				if (!this.settings.skipExistingNotes && this.settings.customProperties) {
+					for (const [key, value] of Object.entries(this.settings.customProperties)) {
+						if (key && value && !frontmatter[key]) {
+							frontmatter[key] = value;
+						}
+					}
+				}
+				
+				// Note: When skipExistingNotes is true, custom properties and date are NOT added
+				// Existing custom properties in the note are always preserved
 			});
 			
 		} catch (error) {
