@@ -916,13 +916,15 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 			
 			frontmatter += '---\n\n';
 
-			let finalMarkdown = frontmatter + markdownContent;
+			// Use the generated filename (without extension) as the H1 title right after frontmatter
+			const filenameBase = this.generateFilename(doc);
+			let finalMarkdown = frontmatter + '# ' + filenameBase + '\n\n' + markdownContent;
 			// Add transcript section if enabled and transcript is available
 			if (this.settings.includeFullTranscript) {
 				finalMarkdown += '\n\n# Transcript\n\n' + transcript;
 			}
 
-			const filename = this.generateFilename(doc) + '.md';
+			const filename = filenameBase + '.md';
 			// Use date-based path if enabled, otherwise use sync directory
 			const targetDirectory = this.generateDateBasedPath(doc);
 			const filepath = path.join(targetDirectory, filename);
@@ -1206,7 +1208,67 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 		}
 	}
 
-	extractAttendeeNames(doc) {
+		extractGranolaDisplayNames(doc) {
+		const displayNames = [];
+		const processedEmails = new Set(); // Track processed emails to avoid duplicates
+		
+		try {
+			// Check the people field for attendee information (enhanced with detailed person data)
+			if (doc.people && Array.isArray(doc.people)) {
+				for (const person of doc.people) {
+					let name = null;
+					
+					// Try to get name from various fields
+					if (person.name) {
+						name = person.name;
+					} else if (person.display_name) {
+						name = person.display_name;
+					} else if (person.details && person.details.person && person.details.person.name) {
+						// Use the detailed person information if available
+						const personDetails = person.details.person.name;
+						if (personDetails.fullName) {
+							name = personDetails.fullName;
+						} else if (personDetails.givenName && personDetails.familyName) {
+							name = `${personDetails.givenName} ${personDetails.familyName}`;
+						} else if (personDetails.givenName) {
+							name = personDetails.givenName;
+						}
+					}
+					
+					if (name && !displayNames.includes(name)) {
+						displayNames.push(name);
+						if (person.email) {
+							processedEmails.add(person.email);
+						}
+					}
+				}
+			}
+			
+			// Also check google_calendar_event for additional attendee info
+			if (doc.google_calendar_event && doc.google_calendar_event.attendees) {
+				for (const attendee of doc.google_calendar_event.attendees) {
+					// Skip if we've already processed this email
+					if (attendee.email && processedEmails.has(attendee.email)) {
+						continue;
+					}
+					
+					if (attendee.displayName && !displayNames.includes(attendee.displayName)) {
+						displayNames.push(attendee.displayName);
+						if (attendee.email) {
+							processedEmails.add(attendee.email);
+						}
+					}
+				}
+			}
+			
+			return displayNames;
+		} catch (error) {
+			console.error('Error extracting Granola display names:', error);
+			return [];
+		}
+	}
+
+		extractAttendeeNames(doc) {
 		const attendees = [];
 		const processedEmails = new Set(); // Track processed emails to avoid duplicates
 		
@@ -1274,20 +1336,41 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 		}
 	}
 
+	generateRelatedPeople(attendees) {
+		if (!attendees || attendees.length === 0) {
+			return [];
+		}
+
+		const relatedPeople = [];
+
+		for (const attendee of attendees) {
+			// Skip if this is the user's own name (case-insensitive, exact match)
+			if (this.settings.excludeMyNameFromTags && this.settings.myName &&
+				attendee.toLowerCase().trim() === this.settings.myName.toLowerCase().trim()) {
+				continue;
+			}
+
+			// Format as Obsidian link
+			relatedPeople.push(`"[[${attendee.trim()}]]"`);
+		}
+
+		return relatedPeople;
+	}
+
 	generateAttendeeTags(attendees) {
 		if (!this.settings.includeAttendeeTags || !attendees || attendees.length === 0) {
 			return [];
 		}
-		
+
 		const tags = [];
-		
+
 		for (const attendee of attendees) {
 			// Skip if this is the user's own name (case-insensitive, exact match)
-			if (this.settings.excludeMyNameFromTags && this.settings.myName && 
+			if (this.settings.excludeMyNameFromTags && this.settings.myName &&
 				attendee.toLowerCase().trim() === this.settings.myName.toLowerCase().trim()) {
 				continue;
 			}
-			
+
 			// Convert name to valid tag format
 			// Remove special characters, replace spaces with hyphens, convert to lowercase
 			let cleanName = attendee
@@ -1295,10 +1378,10 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 				.trim()
 				.replace(/\s+/g, '-') // Replace spaces with hyphens
 				.toLowerCase();
-			
+
 			// Use the customizable tag template
 			let tag = this.settings.attendeeTagTemplate.replace('{name}', cleanName);
-			
+
 			// Ensure the tag is valid (no double slashes, etc.)
 			tag = tag.replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
 			
@@ -1455,7 +1538,7 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 		if (isExistingNote && this.settings.skipExistingNotes) {
 			return frontmatter;
 		}
-		
+
 		// Add automatic date property from created_at using user's date format
 		if (doc && doc.created_at) {
 			const datePropertyPattern = /^date:\s/m;
@@ -1464,7 +1547,22 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 				frontmatter += `date: ${formattedDate}\n`;
 			}
 		}
-		
+
+		// Add related_people property from attendees (Granola-provided names only)
+		if (doc) {
+			const relatedPeoplePattern = /^related_people:\s/m;
+			if (!relatedPeoplePattern.test(frontmatter)) {
+				const granolaNames = this.extractGranolaDisplayNames(doc);
+				const relatedPeople = this.generateRelatedPeople(granolaNames);
+				if (relatedPeople.length > 0) {
+					frontmatter += `related_people:\n`;
+					for (const person of relatedPeople) {
+						frontmatter += `  - ${person}\n`;
+					}
+				}
+			}
+		}
+
 		// Add custom properties if any are configured
 		if (this.settings.customProperties && Object.keys(this.settings.customProperties).length > 0) {
 			for (const [key, value] of Object.entries(this.settings.customProperties)) {
@@ -1485,36 +1583,42 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 			// Extract all metadata
 			const attendeeNames = this.extractAttendeeNames(doc);
 			const attendeeTags = this.generateAttendeeTags(attendeeNames);
+			const relatedPeople = this.generateRelatedPeople(this.extractGranolaDisplayNames(doc));
 			const folderNames = this.extractFolderNames(doc);
 			const folderTags = this.generateFolderTags(folderNames);
 			const granolaUrl = this.generateGranolaUrl(doc.id);
-			
+
 			// Use FileManager.processFrontMatter for atomic frontmatter updates
 			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 				// Preserve existing tags that are not person or folder tags
 				// Keep default tags since we're not updating them when skipExistingNotes is true
 				const existingTags = frontmatter.tags || [];
-				const preservedTags = existingTags.filter(tag => 
-					!tag.startsWith('person/') && 
+				const preservedTags = existingTags.filter(tag =>
+					!tag.startsWith('person/') &&
 					!tag.startsWith('folder/')
 				);
-				
+
 				// Combine attendee and folder tags only (no default tags when skipExistingNotes is true)
 				const newTags = [...attendeeTags, ...folderTags];
-				
+
 				// Update tags
 				frontmatter.tags = [...preservedTags, ...newTags];
-				
+
 				// Update or add Granola URL if enabled
 				if (granolaUrl) {
 					frontmatter.granola_url = granolaUrl;
 				}
-				
+
 				// Add automatic date property if not present and skipExistingNotes allows it
 				if (!this.settings.skipExistingNotes && doc.created_at && !frontmatter.date) {
 					frontmatter.date = this.formatDate(doc.created_at, this.settings.dateFormat);
 				}
-				
+
+				// Add related_people property if not present and skipExistingNotes allows it
+				if (!this.settings.skipExistingNotes && relatedPeople.length > 0 && !frontmatter.related_people) {
+					frontmatter.related_people = relatedPeople;
+				}
+
 				// Add custom properties if skipExistingNotes allows it
 				if (!this.settings.skipExistingNotes && this.settings.customProperties) {
 					for (const [key, value] of Object.entries(this.settings.customProperties)) {
@@ -1523,8 +1627,8 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 						}
 					}
 				}
-				
-				// Note: When skipExistingNotes is true, custom properties and date are NOT added
+
+				// Note: When skipExistingNotes is true, custom properties, date, and related_people are NOT added
 				// Existing custom properties in the note are always preserved
 			});
 			
