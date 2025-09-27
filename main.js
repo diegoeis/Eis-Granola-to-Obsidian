@@ -37,6 +37,7 @@ const DEFAULT_SETTINGS = {
 	dateFolderFormat: 'YYYY-MM-DD',
 	defaultTags: [], // Array of default tags to add to all notes
 	customProperties: {}, // Object with custom properties to add to frontmatter (key: value pairs)
+	relatedPeopleFallbackSuffix: 'suffix_post_name', // Suffix appended inside [[...]] only for email-fallback names
 };
 
 class GranolaSyncPlugin extends obsidian.Plugin {
@@ -1208,69 +1209,10 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 		}
 	}
 
-		extractGranolaDisplayNames(doc) {
-		const displayNames = [];
-		const processedEmails = new Set(); // Track processed emails to avoid duplicates
-		
-		try {
-			// Check the people field for attendee information (enhanced with detailed person data)
-			if (doc.people && Array.isArray(doc.people)) {
-				for (const person of doc.people) {
-					let name = null;
-					
-					// Try to get name from various fields
-					if (person.name) {
-						name = person.name;
-					} else if (person.display_name) {
-						name = person.display_name;
-					} else if (person.details && person.details.person && person.details.person.name) {
-						// Use the detailed person information if available
-						const personDetails = person.details.person.name;
-						if (personDetails.fullName) {
-							name = personDetails.fullName;
-						} else if (personDetails.givenName && personDetails.familyName) {
-							name = `${personDetails.givenName} ${personDetails.familyName}`;
-						} else if (personDetails.givenName) {
-							name = personDetails.givenName;
-						}
-					}
-					
-					if (name && !displayNames.includes(name)) {
-						displayNames.push(name);
-						if (person.email) {
-							processedEmails.add(person.email);
-						}
-					}
-				}
-			}
-			
-			// Also check google_calendar_event for additional attendee info
-			if (doc.google_calendar_event && doc.google_calendar_event.attendees) {
-				for (const attendee of doc.google_calendar_event.attendees) {
-					// Skip if we've already processed this email
-					if (attendee.email && processedEmails.has(attendee.email)) {
-						continue;
-					}
-					
-					if (attendee.displayName && !displayNames.includes(attendee.displayName)) {
-						displayNames.push(attendee.displayName);
-						if (attendee.email) {
-							processedEmails.add(attendee.email);
-						}
-					}
-				}
-			}
-			
-			return displayNames;
-		} catch (error) {
-			console.error('Error extracting Granola display names:', error);
-			return [];
-		}
-	}
 
 		extractAttendeeNames(doc) {
-		const attendees = [];
-		const processedEmails = new Set(); // Track processed emails to avoid duplicates
+			const attendees = [];
+			const processedEmails = new Set(); // Track processed emails to avoid duplicates
 		
 		try {
 			// Check the people field for attendee information (enhanced with detailed person data)
@@ -1336,6 +1278,50 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 		}
 	}
 
+	// Reuse extractAttendeeNames and mark which ones came from email fallback
+	extractAttendeeNamesWithSource(doc) {
+		try {
+			// Use existing extraction (do not modify it)
+			const names = this.extractAttendeeNames(doc);
+			// Derive which names would have come from email (fallback) by inspecting the doc
+			const fallbackNames = new Set();
+
+			// Helper to mark fallback name from a local-part email
+			const addFallbackFromEmail = (email) => {
+				if (!email) return;
+				const lp = String(email).split('@')[0].replace(/[._]/g, ' ');
+				if (lp) fallbackNames.add(lp);
+			};
+
+			// Inspect doc.people
+			if (doc.people && Array.isArray(doc.people)) {
+				for (const person of doc.people) {
+					// If no provided name fields, then fallback would have been used
+					const hasProvidedName = !!(person && (person.name || person.display_name || (person.details && person.details.person && person.details.person.name)));
+					if (!hasProvidedName && person && person.email) {
+						addFallbackFromEmail(person.email);
+					}
+				}
+			}
+
+			// Inspect google calendar attendees
+			if (doc.google_calendar_event && doc.google_calendar_event.attendees) {
+				for (const attendee of doc.google_calendar_event.attendees) {
+					if (!attendee) continue;
+					if (!attendee.displayName && attendee.email) {
+						addFallbackFromEmail(attendee.email);
+					}
+				}
+			}
+
+			// Map names to objects with isFallback
+			return names.map(n => ({ name: n, isFallback: fallbackNames.has(n) }));
+		} catch (error) {
+			console.error('Error extracting attendee names with source:', error);
+			return [];
+		}
+	}
+
 	generateRelatedPeople(attendees) {
 		if (!attendees || attendees.length === 0) {
 			return [];
@@ -1343,15 +1329,30 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 
 		const relatedPeople = [];
 
-		for (const attendee of attendees) {
+		for (const item of attendees) {
+			// Support both plain string names and detailed objects { name, isFallback }
+			const attendee = (typeof item === 'string') ? item : (item && item.name ? item.name : '');
+			const isFallback = (typeof item === 'object' && item && item.isFallback === true);
 			// Skip if this is the user's own name (case-insensitive, exact match)
 			if (this.settings.excludeMyNameFromTags && this.settings.myName &&
 				attendee.toLowerCase().trim() === this.settings.myName.toLowerCase().trim()) {
 				continue;
 			}
 
-			// Format as Obsidian link
-			relatedPeople.push(`"[[${attendee.trim()}]]"`);
+			// Also skip explicit username 'diegoeis' regardless of spacing/case
+			const normalized = attendee.toLowerCase().replace(/\s+/g, '');
+			if (normalized === 'diegoeis') {
+				continue;
+			}
+
+			// Format as Obsidian link; only add configured suffix inside the link when name came from email fallback
+			if (isFallback) {
+				const suffix = (this.settings.relatedPeopleFallbackSuffix || '').trim();
+				const decorated = suffix ? `${attendee.trim()} ${suffix}` : attendee.trim();
+				relatedPeople.push(`"[[${decorated}]]"`);
+			} else {
+				relatedPeople.push(`"[[${attendee.trim()}]]"`);
+			}
 		}
 
 		return relatedPeople;
@@ -1548,12 +1549,12 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 			}
 		}
 
-		// Add related_people property from attendees (Granola-provided names only)
+		// Add related_people property from attendees using fallback marker for formatting
 		if (doc) {
 			const relatedPeoplePattern = /^related_people:\s/m;
 			if (!relatedPeoplePattern.test(frontmatter)) {
-				const granolaNames = this.extractGranolaDisplayNames(doc);
-				const relatedPeople = this.generateRelatedPeople(granolaNames);
+				const attendeeNamesForRelated = this.extractAttendeeNamesWithSource(doc);
+				const relatedPeople = this.generateRelatedPeople(attendeeNamesForRelated);
 				if (relatedPeople.length > 0) {
 					frontmatter += `related_people:\n`;
 					for (const person of relatedPeople) {
@@ -1583,7 +1584,7 @@ class GranolaSyncPlugin extends obsidian.Plugin {
 			// Extract all metadata
 			const attendeeNames = this.extractAttendeeNames(doc);
 			const attendeeTags = this.generateAttendeeTags(attendeeNames);
-			const relatedPeople = this.generateRelatedPeople(this.extractGranolaDisplayNames(doc));
+			const relatedPeople = this.generateRelatedPeople(this.extractAttendeeNamesWithSource(doc));
 			const folderNames = this.extractFolderNames(doc);
 			const folderTags = this.generateFolderTags(folderNames);
 			const granolaUrl = this.generateGranolaUrl(doc.id);
@@ -1852,6 +1853,18 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 
 		// Create a heading for metadata settings
 		containerEl.createEl('h3', {text: 'Note metadata & tags'});
+
+		new obsidian.Setting(containerEl)
+			.setName('Related people fallback suffix')
+			.setDesc('Suffix to append after the participant name when it comes from email fallback (e.g., "company name"). Leave empty to omit.')
+			.addText(text => {
+				text.setPlaceholder('suffix name');
+				text.setValue(this.plugin.settings.relatedPeopleFallbackSuffix || '');
+				text.onChange(async (value) => {
+					this.plugin.settings.relatedPeopleFallbackSuffix = (value || '').trim();
+					await this.plugin.saveSettings();
+				});
+			});
 
 		new obsidian.Setting(containerEl)
 			.setName('Include attendee tags')
