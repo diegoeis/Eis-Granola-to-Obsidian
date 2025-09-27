@@ -1650,17 +1650,8 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 		const containerEl = this.containerEl;
 		containerEl.empty();
 
-		new obsidian.Setting(containerEl)
-			.setName('Note prefix')
-			.setDesc('Optional prefix to add to all synced note titles')
-			.addText(text => {
-				text.setPlaceholder('granola-');
-				text.setValue(this.plugin.settings.notePrefix);
-				text.onChange(async (value) => {
-					this.plugin.settings.notePrefix = value;
-					await this.plugin.saveSettings();
-				});
-			});
+		// Granola Configurations
+		containerEl.createEl('h3', { text: 'Granola Configurations' });
 
 		new obsidian.Setting(containerEl)
 			.setName('Auth key path')
@@ -1674,19 +1665,7 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 				});
 			});
 
-		new obsidian.Setting(containerEl)
-			.setName('Date format')
-			.setDesc('Format for dates in filenames. Use YYYY (year), MM (month), DD (day)')
-			.addText(text => {
-				text.setPlaceholder('YYYY-MM-DD');
-				text.setValue(this.plugin.settings.dateFormat);
-				text.onChange(async (value) => {
-					this.plugin.settings.dateFormat = value;
-					await this.plugin.saveSettings();
-				});
-			});
-
-
+		// Include full transcript (inside Granola Configurations)
 		new obsidian.Setting(containerEl)
 			.setName('Include full transcript')
 			.setDesc('Include the full meeting transcript in each note under a "# Transcript" section. This requires an additional API call per note and may slow down sync.')
@@ -1694,6 +1673,35 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 				toggle.setValue(this.plugin.settings.includeFullTranscript);
 				toggle.onChange(async (value) => {
 					this.plugin.settings.includeFullTranscript = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+
+		new obsidian.Setting(containerEl)
+			.setName('Skip existing notes')
+			.setDesc('When enabled, notes that already exist will not be updated during sync. Exception: if attendee tags or Granola URLs are enabled, only those metadata will be updated while preserving content. Default tags are NOT added to existing notes when this is enabled.')
+			.addToggle(toggle => {
+				toggle.setValue(this.plugin.settings.skipExistingNotes);
+				toggle.onChange(async (value) => {
+					this.plugin.settings.skipExistingNotes = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		// (moved Auto-sync frequency to Sync Configuration section below)
+
+		// Filename pattern
+		containerEl.createEl('h3', { text: 'Filename pattern' });
+
+		new obsidian.Setting(containerEl)
+			.setName('Note prefix')
+			.setDesc('Optional prefix to add to all synced note titles')
+			.addText(text => {
+				text.setPlaceholder('granola-');
+				text.setValue(this.plugin.settings.notePrefix);
+				text.onChange(async (value) => {
+					this.plugin.settings.notePrefix = value;
 					await this.plugin.saveSettings();
 				});
 			});
@@ -1710,36 +1718,18 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 				});
 			});
 
-		new obsidian.Setting(containerEl)
-			.setName('Auto-sync frequency')
-			.setDesc('How often to automatically sync notes')
-			.addDropdown(dropdown => {
-				dropdown.addOption('0', 'Never');
-				dropdown.addOption('60000', 'Every 1 minute');
-				dropdown.addOption('300000', 'Every 5 minutes');
-				dropdown.addOption('600000', 'Every 10 minutes');
-				dropdown.addOption('1800000', 'Every 30 minutes');
-				dropdown.addOption('3600000', 'Every 1 hour');
-				dropdown.addOption('21600000', 'Every 6 hours');
-				dropdown.addOption('86400000', 'Every 24 hours');
-				
-				dropdown.setValue(String(this.plugin.settings.autoSyncFrequency));
-				dropdown.onChange(async (value) => {
-					this.plugin.settings.autoSyncFrequency = parseInt(value);
-					await this.plugin.saveSettings();
-					
-					const label = this.plugin.getFrequencyLabel(parseInt(value));
-					new obsidian.Notice('Auto-sync updated: ' + label);
-				});
-			});
+		// Folder Configurations
+		containerEl.createEl('h3', { text: 'Folder Configurations' });
 
+		// Sync directory
 		new obsidian.Setting(containerEl)
-			.setName('Skip existing notes')
-			.setDesc('When enabled, notes that already exist will not be updated during sync. Exception: if attendee tags or Granola URLs are enabled, only those metadata will be updated while preserving content. Default tags are NOT added to existing notes when this is enabled.')
-			.addToggle(toggle => {
-				toggle.setValue(this.plugin.settings.skipExistingNotes);
-				toggle.onChange(async (value) => {
-					this.plugin.settings.skipExistingNotes = value;
+			.setName('Sync directory')
+			.setDesc('Directory within your vault where Granola notes will be synced')
+			.addText(text => {
+				text.setPlaceholder('Granola');
+				text.setValue(this.plugin.settings.syncDirectory);
+				text.onChange(async (value) => {
+					this.plugin.settings.syncDirectory = value;
 					await this.plugin.saveSettings();
 				});
 			});
@@ -1752,107 +1742,28 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 				toggle.onChange(async (value) => {
 					this.plugin.settings.enableDateBasedFolders = value;
 					await this.plugin.saveSettings();
+					this.display();
 				});
 			});
 
-		new obsidian.Setting(containerEl)
-			.setName('Date folder format')
-			.setDesc('Format for date-based folder structure. Examples: "YYYY-MM-DD" or "YYYY/MM/DD" subfolders')
-			.addText(text => {
-				text.setPlaceholder('YYYY/MM/DD');
-				text.setValue(this.plugin.settings.dateFolderFormat);
-				text.onChange(async (value) => {
-					this.plugin.settings.dateFolderFormat = value || 'YYYY/MM/DD';
-					await this.plugin.saveSettings();
-				});
-			});
-
-		// Create experimental section header
-		containerEl.createEl('h4', {text: '🧪 Experimental features'});
-		
-		const experimentalWarning = containerEl.createEl('div', { cls: 'setting-item' });
-		experimentalWarning.createEl('div', { cls: 'setting-item-info' });
-		const warningNameEl = experimentalWarning.createEl('div', { cls: 'setting-item-name' });
-		warningNameEl.setText('⚠️ Please backup your vault');
-		const warningDescEl = experimentalWarning.createEl('div', { cls: 'setting-item-description' });
-		warningDescEl.setText('⚠️ The features below are experimental and may create duplicate notes if not used carefully. Please backup your vault before changing these settings.');
-
-		new obsidian.Setting(containerEl)
-			.setName('Search scope for existing notes')
-			.setDesc('Choose where to search for existing notes when checking granola-id. "Sync directory only" (default) only checks the configured sync folder. "Entire vault" allows you to move notes anywhere in your vault. "Specific folders" lets you choose which folders to search.')
-			.addDropdown(dropdown => {
-				dropdown.addOption('syncDirectory', 'Sync directory only (default)');
-				dropdown.addOption('entireVault', 'Entire vault');
-				dropdown.addOption('specificFolders', 'Specific folders');
-				
-				dropdown.setValue(this.plugin.settings.existingNoteSearchScope);
-				dropdown.onChange(async (value) => {
-					const oldValue = this.plugin.settings.existingNoteSearchScope;
-					this.plugin.settings.existingNoteSearchScope = value;
-					
-					// Save settings without triggering auto-sync to prevent duplicates
-					await this.plugin.saveSettingsWithoutSync();
-					
-					// Show warning if search scope changed
-					if (oldValue !== value) {
-						new obsidian.Notice('Search scope changed. Consider running a manual sync to test the new settings before relying on auto-sync.');
-					}
-					
-					this.display(); // Refresh the settings display
-				});
-			});
-
-		// Show folder selection only when 'specificFolders' is selected
-		if (this.plugin.settings.existingNoteSearchScope === 'specificFolders') {
+		if (this.plugin.settings.enableDateBasedFolders) {
 			new obsidian.Setting(containerEl)
-				.setName('Specific search folders')
-				.setDesc('Enter folder paths to search (one per line). Leave empty to search all folders.')
-				.addTextArea(text => {
-					text.setPlaceholder('Examples:\nMeetings\nProjects/Work\nDaily Notes');
-					text.setValue(this.plugin.settings.specificSearchFolders.join('\n'));
-					
-					// Save settings immediately on change (without validation and without auto-sync)
+				.setName('Date folder format')
+				.setDesc('Format for date-based folder structure. Examples: "YYYY-MM-DD" or "YYYY/MM/DD" subfolders')
+				.addText(text => {
+					text.setPlaceholder('YYYY/MM/DD');
+					text.setValue(this.plugin.settings.dateFolderFormat);
 					text.onChange(async (value) => {
-						const folders = value.split('\n').map(f => f.trim()).filter(f => f.length > 0);
-						this.plugin.settings.specificSearchFolders = folders;
-						await this.plugin.saveSettingsWithoutSync();
-					});
-					
-					// Validate only when user finishes editing (on blur)
-					text.inputEl.addEventListener('blur', () => {
-						const value = text.getValue();
-						const folders = value.split('\n').map(f => f.trim()).filter(f => f.length > 0);
-						
-						if (folders.length === 0) {
-							return; // Don't validate if no folders specified
-						}
-						
-						// Validate folder paths
-						const invalidFolders = [];
-						for (const folderPath of folders) {
-							const folder = this.app.vault.getFolderByPath(folderPath);
-							if (!folder) {
-								invalidFolders.push(folderPath);
-							}
-						}
-						
-						if (invalidFolders.length > 0) {
-							new obsidian.Notice('Warning: These folders do not exist: ' + invalidFolders.join(', '));
-						}
+						this.plugin.settings.dateFolderFormat = value || 'YYYY/MM/DD';
+						await this.plugin.saveSettings();
 					});
 				});
 		}
 
-		// Add info section about avoiding duplicates
-		const infoEl = containerEl.createEl('div', { cls: 'setting-item' });
-		infoEl.createEl('div', { cls: 'setting-item-info' });
-		const infoNameEl = infoEl.createEl('div', { cls: 'setting-item-name' });
-		infoNameEl.setText('⚠️ Avoiding duplicates');
-		const infoDescEl = infoEl.createEl('div', { cls: 'setting-item-description' });
-		infoDescEl.setText('When changing search scope, existing notes in other locations won\'t be found and may be recreated. To avoid duplicates: 1) Move your existing notes to the new search location first, or 2) Use "Entire Vault" to search everywhere, or 3) Run a manual sync after changing settings to test before auto-sync runs.');
+		// (Avoiding duplicates info moved under Experimental features at the end)
 
-		// Create a heading for metadata settings
-		containerEl.createEl('h3', {text: 'Note metadata & tags'});
+		// Frontmatter Customizations
+		containerEl.createEl('h3', {text: 'Frontmatter Customizations'});
 
 		new obsidian.Setting(containerEl)
 			.setName('Related people fallback suffix')
@@ -1866,68 +1777,7 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 				});
 			});
 
-		new obsidian.Setting(containerEl)
-			.setName('Include attendee tags')
-			.setDesc('Add meeting attendees as tags in the frontmatter of each note')
-			.addToggle(toggle => {
-				toggle.setValue(this.plugin.settings.includeAttendeeTags);
-				toggle.onChange(async (value) => {
-					this.plugin.settings.includeAttendeeTags = value;
-					await this.plugin.saveSettings();
-				});
-			});
-
-		new obsidian.Setting(containerEl)
-			.setName('Exclude my name from tags')
-			.setDesc('When adding attendee tags, exclude your own name from the list')
-			.addToggle(toggle => {
-				toggle.setValue(this.plugin.settings.excludeMyNameFromTags);
-				toggle.onChange(async (value) => {
-					this.plugin.settings.excludeMyNameFromTags = value;
-					await this.plugin.saveSettings();
-				});
-			});
-
-		new obsidian.Setting(containerEl)
-			.setName('My name')
-			.setDesc('Your name as it appears in Granola meetings (used to exclude from attendee tags)')
-			.addText(text => {
-				text.setPlaceholder('Danny McClelland');
-				text.setValue(this.plugin.settings.myName);
-				text.onChange(async (value) => {
-					this.plugin.settings.myName = value;
-					await this.plugin.saveSettings();
-				});
-			});
-
-		new obsidian.Setting(containerEl)
-			.setName('Attendee tag template')
-			.setDesc('Customize the structure of attendee tags. Use {name} as placeholder for the attendee name. Examples: "person/{name}", "people/{name}", "meeting-attendees/{name}"')
-			.addText(text => {
-				text.setPlaceholder('person/{name}');
-				text.setValue(this.plugin.settings.attendeeTagTemplate);
-				text.onChange(async (value) => {
-					// Validate the template has {name} placeholder
-					if (!value.includes('{name}')) {
-						new obsidian.Notice('Warning: Tag template should include {name} placeholder');
-					}
-					this.plugin.settings.attendeeTagTemplate = value || 'person/{name}';
-					await this.plugin.saveSettings();
-				});
-			});
-
-		// Note: Folder tags setting is temporarily hidden as folder information is not yet available in Granola API
-		// new obsidian.Setting(containerEl)
-		// 	.setName('Include Folder Tags')
-		// 	.setDesc('Add Granola folder/list names as tags in the frontmatter of each note. Supports multiple folders per note (e.g., folder/test-folder, folder/project-alpha)')
-		// 	.addToggle(toggle => {
-		// 		toggle.setValue(this.plugin.settings.includeFolderTags);
-		// 		toggle.onChange(async (value) => {
-		// 			this.plugin.settings.includeFolderTags = value;
-		// 			await this.plugin.saveSettings();
-		// 		});
-		// 	});
-
+		// Moved here: Include Granola URL, Default tags, Custom properties
 		new obsidian.Setting(containerEl)
 			.setName('Include Granola URL')
 			.setDesc('Add a link back to the original Granola note in the frontmatter (e.g., granola_url: "https://notes.granola.ai/d/...")')
@@ -1982,11 +1832,68 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 							}
 						}
 					}
-					
 					this.plugin.settings.customProperties = properties;
 					await this.plugin.saveSettings();
 				});
 			});
+
+		// Attendee Tags
+		containerEl.createEl('h3', {text: 'Attendee Tags'});
+
+		new obsidian.Setting(containerEl)
+			.setName('Include attendee tags')
+			.setDesc('Add meeting attendees as tags in the frontmatter of each note')
+			.addToggle(toggle => {
+				toggle.setValue(this.plugin.settings.includeAttendeeTags);
+				toggle.onChange(async (value) => {
+					this.plugin.settings.includeAttendeeTags = value;
+					await this.plugin.saveSettings();
+					// Refresh UI to show/hide dependent settings
+					this.display();
+				});
+			});
+
+		// Only show the following settings if attendee tags are enabled
+		if (this.plugin.settings.includeAttendeeTags) {
+			new obsidian.Setting(containerEl)
+				.setName('Exclude my name from tags')
+				.setDesc('When adding attendee tags, exclude your own name from the list')
+				.addToggle(toggle => {
+					toggle.setValue(this.plugin.settings.excludeMyNameFromTags);
+					toggle.onChange(async (value) => {
+						this.plugin.settings.excludeMyNameFromTags = value;
+						await this.plugin.saveSettings();
+					});
+				});
+
+			new obsidian.Setting(containerEl)
+				.setName('My name')
+				.setDesc('Your name as it appears in Granola meetings (used to exclude from attendee tags)')
+				.addText(text => {
+					text.setPlaceholder('Your name');
+					text.setValue(this.plugin.settings.myName);
+					text.onChange(async (value) => {
+						this.plugin.settings.myName = value;
+						await this.plugin.saveSettings();
+					});
+				});
+
+			new obsidian.Setting(containerEl)
+				.setName('Attendee tag template')
+				.setDesc('Customize the structure of attendee tags. Use {name} as placeholder for the attendee name. Examples: "person/{name}", "people/{name}", "meeting-attendees/{name}"')
+				.addText(text => {
+					text.setPlaceholder('person/{name}');
+					text.setValue(this.plugin.settings.attendeeTagTemplate);
+					text.onChange(async (value) => {
+						// Validate the template has {name} placeholder
+						if (!value.includes('{name}')) {
+							new obsidian.Notice('Warning: Tag template should include {name} placeholder');
+						}
+						this.plugin.settings.attendeeTagTemplate = value || 'person/{name}';
+						await this.plugin.saveSettings();
+					});
+				});
+		}
 
 		// Create a heading for daily note integration
 		containerEl.createEl('h3', {text: 'Daily note integration'});
@@ -1999,20 +1906,23 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 				toggle.onChange(async (value) => {
 					this.plugin.settings.enableDailyNoteIntegration = value;
 					await this.plugin.saveSettings();
+					this.display();
 				});
 			});
 
-		new obsidian.Setting(containerEl)
-			.setName('Daily note section name')
-			.setDesc('The heading name for the Granola meetings section in your daily note')
-			.addText(text => {
-				text.setPlaceholder('## Granola Meetings');
-				text.setValue(this.plugin.settings.dailyNoteSectionName);
-				text.onChange(async (value) => {
-					this.plugin.settings.dailyNoteSectionName = value;
-					await this.plugin.saveSettings();
+		if (this.plugin.settings.enableDailyNoteIntegration) {
+			new obsidian.Setting(containerEl)
+				.setName('Daily note section name')
+				.setDesc('The heading name for the Granola meetings section in your daily note')
+				.addText(text => {
+					text.setPlaceholder('## Granola Meetings');
+					text.setValue(this.plugin.settings.dailyNoteSectionName);
+					text.onChange(async (value) => {
+						this.plugin.settings.dailyNoteSectionName = value;
+						await this.plugin.saveSettings();
+					});
 				});
-			});
+		}
 
 		// Create a heading for periodic note integration
 		containerEl.createEl('h3', {text: 'Periodic note integration'});
@@ -2021,40 +1931,37 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 			.setName('Periodic note integration')
 			.setDesc('Add todays meetings to your periodic notes (daily, weekly, or monthly - requires Periodic Notes plugin)')
 			.addToggle(toggle => {
+				const available = this.plugin.isPeriodicNotesPluginAvailable();
 				toggle.setValue(this.plugin.settings.enablePeriodicNoteIntegration);
-				toggle.setDisabled(!this.plugin.isPeriodicNotesPluginAvailable());
 				toggle.onChange(async (value) => {
+					if (value && !this.plugin.isPeriodicNotesPluginAvailable()) {
+						new obsidian.Notice('Periodic Notes plugin not available. Install and enable it to use periodic note integration.');
+						toggle.setValue(false);
+						this.plugin.settings.enablePeriodicNoteIntegration = false;
+						return;
+					}
 					this.plugin.settings.enablePeriodicNoteIntegration = value;
 					await this.plugin.saveSettings();
+					this.display();
 				});
 			});
 
-		new obsidian.Setting(containerEl)
-			.setName('Periodic note section name')
-			.setDesc('The heading name for the Granola meetings section in your periodic notes (works with daily, weekly, or monthly notes)')
-			.addText(text => {
-				text.setPlaceholder('## Granola Meetings');
-				text.setValue(this.plugin.settings.periodicNoteSectionName);
-				text.onChange(async (value) => {
-					this.plugin.settings.periodicNoteSectionName = value;
-					await this.plugin.saveSettings();
+		if (this.plugin.settings.enablePeriodicNoteIntegration) {
+			new obsidian.Setting(containerEl)
+				.setName('Periodic note section name')
+				.setDesc('The heading name for the Granola meetings section in your periodic notes (works with daily, weekly, or monthly notes)')
+				.addText(text => {
+					text.setPlaceholder('## Granola Meetings');
+					text.setValue(this.plugin.settings.periodicNoteSectionName);
+					text.onChange(async (value) => {
+						this.plugin.settings.periodicNoteSectionName = value;
+						await this.plugin.saveSettings();
+					});
 				});
-			});
+		}
 
-		// Create a heading for file organization settings
-		containerEl.createEl('h3', {text: 'File organization'});
-
-		new obsidian.Setting(containerEl)
-			.setName('Sync directory')
-			.setDesc('Directory within your vault where Granola notes will be synced')
-			.addText(text => {
-				text.setPlaceholder('Granola');
-				text.setValue(this.plugin.settings.syncDirectory);
-				text.onChange(async (value) => {
-					this.plugin.settings.syncDirectory = value;
-					await this.plugin.saveSettings();
-				});
-			});
+		// Sync Configuration
+		containerEl.createEl('h3', {text: 'Sync Configuration'});
 
 		new obsidian.Setting(containerEl)
 			.setName('Manual sync')
@@ -2087,6 +1994,94 @@ class GranolaSyncSettingTab extends obsidian.PluginSettingTab {
 					new obsidian.Notice('Auto-sync re-enabled with current settings');
 				});
 			});
+
+		new obsidian.Setting(containerEl)
+			.setName('Auto-sync frequency')
+			.setDesc('How often to automatically sync notes')
+			.addDropdown(dropdown => {
+				dropdown.addOption('0', 'Never');
+				dropdown.addOption('60000', 'Every 1 minute');
+				dropdown.addOption('300000', 'Every 5 minutes');
+				dropdown.addOption('600000', 'Every 10 minutes');
+				dropdown.addOption('1800000', 'Every 30 minutes');
+				dropdown.addOption('3600000', 'Every 1 hour');
+				dropdown.addOption('21600000', 'Every 6 hours');
+				dropdown.addOption('86400000', 'Every 24 hours');
+				dropdown.setValue(String(this.plugin.settings.autoSyncFrequency));
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.autoSyncFrequency = parseInt(value);
+					await this.plugin.saveSettings();
+					const label = this.plugin.getFrequencyLabel(parseInt(value));
+					new obsidian.Notice('Auto-sync updated: ' + label);
+				});
+			});
+
+
+		// 🧪 Experimental features (last block)
+		containerEl.createEl('h4', {text: '🧪 Experimental features'});
+		const experimentalWarning = containerEl.createEl('div', { cls: 'setting-item' });
+		experimentalWarning.createEl('div', { cls: 'setting-item-info' });
+		const warningNameEl = experimentalWarning.createEl('div', { cls: 'setting-item-name' });
+		warningNameEl.setText('⚠️ Please backup your vault');
+		const warningDescEl = experimentalWarning.createEl('div', { cls: 'setting-item-description' });
+		warningDescEl.setText('⚠️ The features below are experimental and may create duplicate notes if not used carefully. Please backup your vault before changing these settings.');
+
+		new obsidian.Setting(containerEl)
+			.setName('Search scope for existing notes')
+			.setDesc('Choose where to search for existing notes when checking granola-id. "Sync directory only" (default) only checks the configured sync folder. "Entire vault" allows you to move notes anywhere in your vault. "Specific folders" lets you choose which folders to search.')
+			.addDropdown(dropdown => {
+				dropdown.addOption('syncDirectory', 'Sync directory only (default)');
+				dropdown.addOption('entireVault', 'Entire vault');
+				dropdown.addOption('specificFolders', 'Specific folders');
+				
+				dropdown.setValue(this.plugin.settings.existingNoteSearchScope);
+				dropdown.onChange(async (value) => {
+					const oldValue = this.plugin.settings.existingNoteSearchScope;
+					this.plugin.settings.existingNoteSearchScope = value;
+					// Save without triggering auto-sync
+					await this.plugin.saveSettingsWithoutSync();
+					if (oldValue !== value) {
+						new obsidian.Notice('Search scope changed. Consider running a manual sync to test the new settings before relying on auto-sync.');
+					}
+					this.display();
+				});
+			});
+
+		if (this.plugin.settings.existingNoteSearchScope === 'specificFolders') {
+			new obsidian.Setting(containerEl)
+				.setName('Specific search folders')
+				.setDesc('Enter folder paths to search (one per line). Leave empty to search all folders.')
+				.addTextArea(text => {
+					text.setPlaceholder('Examples:\nMeetings\nProjects/Work\nDaily Notes');
+					text.setValue(this.plugin.settings.specificSearchFolders.join('\n'));
+					text.onChange(async (value) => {
+						const folders = value.split('\n').map(f => f.trim()).filter(f => f.length > 0);
+						this.plugin.settings.specificSearchFolders = folders;
+						await this.plugin.saveSettingsWithoutSync();
+					});
+					text.inputEl.addEventListener('blur', () => {
+						const value = text.getValue();
+						const folders = value.split('\n').map(f => f.trim()).filter(f => f.length > 0);
+						if (folders.length === 0) return;
+						const invalidFolders = [];
+						for (const folderPath of folders) {
+							const folder = this.app.vault.getFolderByPath(folderPath);
+							if (!folder) invalidFolders.push(folderPath);
+						}
+						if (invalidFolders.length > 0) {
+							new obsidian.Notice('Warning: These folders do not exist: ' + invalidFolders.join(', '));
+						}
+					});
+				});
+		}
+
+		// Info note about avoiding duplicates
+		const infoEl = containerEl.createEl('div', { cls: 'setting-item' });
+		infoEl.createEl('div', { cls: 'setting-item-info' });
+		const infoNameEl = infoEl.createEl('div', { cls: 'setting-item-name' });
+		infoNameEl.setText('⚠️ Avoiding duplicates');
+		const infoDescEl = infoEl.createEl('div', { cls: 'setting-item-description' });
+		infoDescEl.setText('When changing search scope, existing notes in other locations won\'t be found and may be recreated. To avoid duplicates: 1) Move your existing notes to the new search location first, or 2) Use "Entire Vault" to search everywhere, or 3) Run a manual sync after changing settings to test before auto-sync runs.');
 	}
 }
 
